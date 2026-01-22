@@ -46,7 +46,7 @@ EventGroupHandle_t tcp_event_group; // wifi建立成功信号量
 static int server_socket = 0;					   // 服务器socket
 static struct sockaddr_in server_addr;			   // server地址
 static struct sockaddr_in client_addr;			   // client地址
-static unsigned int socklen = sizeof(client_addr); // 地址长度
+static socklen_t socklen = sizeof(client_addr); // 地址长度
 static int connect_socket = 0;					   // 连接socket
 bool g_rxtx_need_restart = false;				   // 异常后，重新连接标记
 uint8_t work_mode = MODE_STA;
@@ -85,7 +85,7 @@ esp_err_t create_tcp_client();							   // 建立tcp client
 // }
 
 // wifi 事件
-static esp_err_t event_sta_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
+static void event_sta_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     }
@@ -102,7 +102,6 @@ static esp_err_t event_sta_handler(void* arg, esp_event_base_t event_base, int32
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         xEventGroupSetBits(tcp_event_group, WIFI_CONNECTED_BIT);
     }
-    return ESP_OK;
 }
 
 void wifi_send_data(uint8_t* buf, int32_t msg_length) {
