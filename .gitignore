@@ -1,4 +1,9 @@
+# Configs
 .clangd
 .devcontainer/
 .vscode/
+sdkconfig
+sdkconfig.old
+
+# Build directory
 build/

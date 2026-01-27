@@ -62,7 +62,7 @@ void rx_task(void *arg)
         if (rxBytes > 0)
         {
             data[rxBytes] = 0;
-            ESP_LOGE(TAG, "收到串口消息 %d bytes: '%s'", rxBytes, data);
+            ESP_LOGI(TAG, "收到串口消息 %d bytes: %s", rxBytes, data);
             // ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
 
             // if (rxBytes >= 4 && data[0] == 0x41 && data[1] == 0x42 && isalpha(data[2]) && isalpha(data[3]))
@@ -209,134 +209,136 @@ void rx_task(void *arg)
     free(data);
 }
 
-const static char *UART_THREAD = "UART";
+// Below is unused code from some other project. Safely ignore it.  -- Song
 
-void K210_uart_packet_parser(uint8_t *p_data, int size)
-{
-}
+// const static char *UART_THREAD = "UART";
 
-// K210 UART begin
+// void K210_uart_packet_parser(uint8_t *p_data, int size)
+// {
+// }
 
-#define K210_UART_NUM UART_NUM_2
-#define K210_TXD_PIN GPIO_NUM_42
-#define K210_RXD_PIN GPIO_NUM_21
-#define K210_UART_BUFFER_SZIE 1024
-#define K210_UART_QUEUE_SIZE 16
-#define K210_UART_PATTERN_LEN 1
-#define K210_UART_PATTERN_TIMEOUT_VALUE 10
-#define K210_UART_PATTERN_POST_IDLE_VALUE 50
+// // K210 UART begin
 
-void k210_uart_tx(char *packet_buffer, uint16_t buffered_size)
-{
-    uart_write_bytes(K210_UART_NUM, (const char *)packet_buffer, buffered_size);
-}
+// #define K210_UART_NUM UART_NUM_2
+// #define K210_TXD_PIN GPIO_NUM_42
+// #define K210_RXD_PIN GPIO_NUM_21
+// #define K210_UART_BUFFER_SZIE 1024
+// #define K210_UART_QUEUE_SIZE 16
+// #define K210_UART_PATTERN_LEN 1
+// #define K210_UART_PATTERN_TIMEOUT_VALUE 10
+// #define K210_UART_PATTERN_POST_IDLE_VALUE 50
 
-static QueueHandle_t k210_uart_event_queue;
+// void k210_uart_tx(char *packet_buffer, uint16_t buffered_size)
+// {
+//     uart_write_bytes(K210_UART_NUM, (const char *)packet_buffer, buffered_size);
+// }
 
-#define K210_PACKET_END (0xbb)
+// static QueueHandle_t k210_uart_event_queue;
 
-static uint8_t packet_buffer[100];
-static uint8_t slip_buffer[100];
-int8_t uart_init_flag = 0;
-void uart_event_task(void *pvParameters)
-{
-    uart_event_t event;
-    size_t buffered_size;
-    uart_config_t uart_update_k210_config = {
-        .baud_rate = 115200,
-        .data_bits = UART_DATA_8_BITS,
-        .parity = UART_PARITY_DISABLE,
-        .stop_bits = UART_STOP_BITS_1,
-        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
+// #define K210_PACKET_END (0xbb)
 
-    if (ESP_OK != uart_driver_delete(K210_UART_NUM))
-    {
-        uart_init_flag = -1;
-    }
+// static uint8_t packet_buffer[100];
+// static uint8_t slip_buffer[100];
+// int8_t uart_init_flag = 0;
+// void uart_event_task(void *pvParameters)
+// {
+//     uart_event_t event;
+//     size_t buffered_size;
+//     uart_config_t uart_update_k210_config = {
+//         .baud_rate = 115200,
+//         .data_bits = UART_DATA_8_BITS,
+//         .parity = UART_PARITY_DISABLE,
+//         .stop_bits = UART_STOP_BITS_1,
+//         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE};
 
-    if (ESP_OK != uart_param_config(K210_UART_NUM, &uart_update_k210_config))
-    {
-        uart_init_flag = -2;
-    }
+//     if (ESP_OK != uart_driver_delete(K210_UART_NUM))
+//     {
+//         uart_init_flag = -1;
+//     }
 
-    if (ESP_OK != uart_set_pin(K210_UART_NUM, K210_TXD_PIN, K210_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE))
-    {
-        uart_init_flag = -3;
-    }
+//     if (ESP_OK != uart_param_config(K210_UART_NUM, &uart_update_k210_config))
+//     {
+//         uart_init_flag = -2;
+//     }
 
-    if (ESP_OK != uart_driver_install(K210_UART_NUM, K210_UART_BUFFER_SZIE, K210_UART_BUFFER_SZIE, K210_UART_QUEUE_SIZE, &k210_uart_event_queue, 0))
-    {
-        uart_init_flag = -4;
-    }
+//     if (ESP_OK != uart_set_pin(K210_UART_NUM, K210_TXD_PIN, K210_RXD_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE))
+//     {
+//         uart_init_flag = -3;
+//     }
 
-    while (uart_init_flag != 0)
-    {
-        ESP_LOGI(UART_THREAD, "uart intialization false:%d", uart_init_flag);
-        vTaskDelay(2000 / portTICK_PERIOD_MS);
-    }
-    uart_enable_pattern_det_baud_intr(K210_UART_NUM, K210_PACKET_END, K210_UART_PATTERN_LEN, K210_UART_PATTERN_TIMEOUT_VALUE, K210_UART_PATTERN_POST_IDLE_VALUE, 0);
-    uart_pattern_queue_reset(K210_UART_NUM, K210_UART_QUEUE_SIZE);
-    ESP_LOGI(UART_THREAD, "uart_init() intialization completed");
-    uart_init_flag = 1;
-    while (true)
-    {
-        if (xQueueReceive(k210_uart_event_queue, &event, portMAX_DELAY))
-        {
-            if (UART_PATTERN_DET == event.type)
-            {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(uart_get_buffered_data_len(K210_UART_NUM, &buffered_size));
-                int pos = uart_pattern_pop_pos(K210_UART_NUM);
-                if (pos == -1)
-                {
-                    // There used to be a UART_PATTERN_DET event, but the pattern position queue is full so that it can not
-                    // record the position. We should set a larger queue size.
-                    // As an example, we directly flush the rx buffer here.
-                    uart_flush_input(K210_UART_NUM);
-                    ESP_LOGI(UART_THREAD, "queue size is too small");
-                }
-                else
-                {
-                    if (pos == uart_read_bytes(K210_UART_NUM, slip_buffer, pos, 100 / portTICK_PERIOD_MS))
-                    {
-                        uint8_t SLIP_end[K210_UART_PATTERN_LEN + 1];
-                        if (K210_UART_PATTERN_LEN == uart_read_bytes(K210_UART_NUM, SLIP_end, K210_UART_PATTERN_LEN, 100 / portTICK_PERIOD_MS))
-                        {
-                            if ((buffered_size == pos + 1) && (buffered_size - 1 > 0))
-                            {
-                                memset(packet_buffer, 0, sizeof(packet_buffer));
-                                memcpy(packet_buffer, slip_buffer, buffered_size - 1);
-                                packet_buffer[buffered_size - 1] = SLIP_end[0];
-                                // uart_write_bytes(K210_UART_NUM, (const char *)packet_buffer, buffered_size);
-                                // ESP_LOGE(UART_THREAD, "11111");
-                                K210_uart_packet_parser(packet_buffer, buffered_size);
-                            }
-                        }
-                        else
-                        {
-                            ESP_LOGE(UART_THREAD, "uart_read_bytes() ERROR");
-                        }
-                    }
-                    else
-                    {
-                        ESP_LOGE(UART_THREAD, "uart_read_bytes() ERROR");
-                    }
-                }
-            }
-        }
-    }
-    vTaskDelete(NULL);
-}
+//     if (ESP_OK != uart_driver_install(K210_UART_NUM, K210_UART_BUFFER_SZIE, K210_UART_BUFFER_SZIE, K210_UART_QUEUE_SIZE, &k210_uart_event_queue, 0))
+//     {
+//         uart_init_flag = -4;
+//     }
 
-void report_car_status_to_k210(void *pvParameters)
-{ // |  协议头 |载包长度| 舵轮RPM |舵轮角度| 左腿角度|右腿角度|超声波距离  | 协议尾   |
-    // 0xEE,0XAA,  0X0A, | L   H   | 									| 0x00 0xbb|
-    uint8_t report_buf[20] = {0};
-    while (1)
-    {
-        if (uart_init_flag == 1)
-        {
-            k210_uart_tx((char *)report_buf, 15);
-        }
-        vTaskDelay(100 / portTICK_PERIOD_MS);
-    }
-}
+//     while (uart_init_flag != 0)
+//     {
+//         ESP_LOGI(UART_THREAD, "uart intialization false:%d", uart_init_flag);
+//         vTaskDelay(2000 / portTICK_PERIOD_MS);
+//     }
+//     uart_enable_pattern_det_baud_intr(K210_UART_NUM, K210_PACKET_END, K210_UART_PATTERN_LEN, K210_UART_PATTERN_TIMEOUT_VALUE, K210_UART_PATTERN_POST_IDLE_VALUE, 0);
+//     uart_pattern_queue_reset(K210_UART_NUM, K210_UART_QUEUE_SIZE);
+//     ESP_LOGI(UART_THREAD, "uart_init() intialization completed");
+//     uart_init_flag = 1;
+//     while (true)
+//     {
+//         if (xQueueReceive(k210_uart_event_queue, &event, portMAX_DELAY))
+//         {
+//             if (UART_PATTERN_DET == event.type)
+//             {
+//                 ESP_ERROR_CHECK_WITHOUT_ABORT(uart_get_buffered_data_len(K210_UART_NUM, &buffered_size));
+//                 int pos = uart_pattern_pop_pos(K210_UART_NUM);
+//                 if (pos == -1)
+//                 {
+//                     // There used to be a UART_PATTERN_DET event, but the pattern position queue is full so that it can not
+//                     // record the position. We should set a larger queue size.
+//                     // As an example, we directly flush the rx buffer here.
+//                     uart_flush_input(K210_UART_NUM);
+//                     ESP_LOGI(UART_THREAD, "queue size is too small");
+//                 }
+//                 else
+//                 {
+//                     if (pos == uart_read_bytes(K210_UART_NUM, slip_buffer, pos, 100 / portTICK_PERIOD_MS))
+//                     {
+//                         uint8_t SLIP_end[K210_UART_PATTERN_LEN + 1];
+//                         if (K210_UART_PATTERN_LEN == uart_read_bytes(K210_UART_NUM, SLIP_end, K210_UART_PATTERN_LEN, 100 / portTICK_PERIOD_MS))
+//                         {
+//                             if ((buffered_size == pos + 1) && (buffered_size - 1 > 0))
+//                             {
+//                                 memset(packet_buffer, 0, sizeof(packet_buffer));
+//                                 memcpy(packet_buffer, slip_buffer, buffered_size - 1);
+//                                 packet_buffer[buffered_size - 1] = SLIP_end[0];
+//                                 // uart_write_bytes(K210_UART_NUM, (const char *)packet_buffer, buffered_size);
+//                                 // ESP_LOGE(UART_THREAD, "11111");
+//                                 K210_uart_packet_parser(packet_buffer, buffered_size);
+//                             }
+//                         }
+//                         else
+//                         {
+//                             ESP_LOGE(UART_THREAD, "uart_read_bytes() ERROR");
+//                         }
+//                     }
+//                     else
+//                     {
+//                         ESP_LOGE(UART_THREAD, "uart_read_bytes() ERROR");
+//                     }
+//                 }
+//             }
+//         }
+//     }
+//     vTaskDelete(NULL);
+// }
+
+// void report_car_status_to_k210(void *pvParameters)
+// { // |  协议头 |载包长度| 舵轮RPM |舵轮角度| 左腿角度|右腿角度|超声波距离  | 协议尾   |
+//     // 0xEE,0XAA,  0X0A, | L   H   | 									| 0x00 0xbb|
+//     uint8_t report_buf[20] = {0};
+//     while (1)
+//     {
+//         if (uart_init_flag == 1)
+//         {
+//             k210_uart_tx((char *)report_buf, 15);
+//         }
+//         vTaskDelay(100 / portTICK_PERIOD_MS);
+//     }
+// }
