@@ -61,7 +61,9 @@ void app_main(void)
     grt.arm_config.theta1_min = -45; // 到时候设计的-30度为归零原点 所以所有的都要加30度 也就是电机1坐标顺时针旋转30度
     grt.arm_config.theta2_max = 160; // 到时候设计的20度为归零原点 所以所有的都要减20度
     grt.arm_config.theta2_min = 10;  // 关节角度限制
+    grt.test_flag = 0;
     // esp_log_level_set("*", ESP_LOG_NONE); //关闭日志打印
+    esp_log_level_set("*", ESP_LOG_INFO);   // 全局输出info级别日志
     gpio_init();                                                               // 初始化输入输出
     uart_init();                                                               // 初始化串口
     motor_uart_init();                                                         // 初始化电机控制串口
@@ -222,13 +224,9 @@ void Arm_motion_test(void *arg)
 
         if (grt.test_flag == 1)
         {
-        }
-
-        if (grt.test_flag == 2)
-        {
 
             MotorCounterClockwise_Angle(60); // 逆时针转动3圈
-            grt.test_flag = 1;
+            grt.test_flag = 0;
             // MotorStop();
         }
 

@@ -17,11 +17,33 @@
 #include "uart.h"
 #include "main.h"
 
-static const char *TAG = "UART";
+static const char *TAG = "COM_HOST";      // 与上位机通信的端口使用该TAG记录日志
+static const char *TAG_PARSER = "CMD_PARSER";
 static const int RX_BUF_SIZE = 1024;
 static const int TX_BUF_SIZE = 1024;
 #define TXD_PIN (GPIO_NUM_4)
 #define RXD_PIN (GPIO_NUM_5)
+
+// 将棋盘坐标系转换为毫米坐标系
+// A-N -> y12-y0; 01-12 -> x12-x1
+// 超出范围时返回False
+static bool b_axis2mm_axis(char *col_char, int row_int) {
+    *col_char = toupper(*col_char);
+    int col_int = *col_char - 'A';
+    col_int = 12 - col_int;
+
+    row_int = 13 - row_int;
+
+    if (row_int < 0 || row_int > 12 || col_int < 0 || col_int > 12) {
+        ESP_LOGD(TAG_PARSER, "棋盘坐标超出范围：%c%d", *col_char, 13 - row_int);
+        return false;
+    }
+
+    grt.play_posx = (row_int * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
+    grt.play_posy = (col_int * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y);
+    ESP_LOGD(TAG_PARSER, "棋盘坐标转换为毫米坐标：%c%d -> (%f, %f)", *col_char, 13 - row_int, grt.play_posx, grt.play_posy);
+    return true;
+}
 
 // 初始化UART
 void uart_init(void)
@@ -49,12 +71,11 @@ void uart_init(void)
 void uart_send(const char *data)
 {
     uart_write_bytes(UART_NUM_1, data, strlen(data));
-    ESP_LOGI(TAG, "向上位机串口发送消息: %s", data);
+    ESP_LOGI(TAG, "[TX] %s", data);
 }
 
 void rx_task(void *arg)
 {
-    esp_log_level_set(TAG, ESP_LOG_INFO);
     uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
     while (1)
     {
@@ -62,147 +83,123 @@ void rx_task(void *arg)
         if (rxBytes > 0)
         {
             data[rxBytes] = 0;
-            ESP_LOGI(TAG, "收到串口消息 %d bytes: %s", rxBytes, data);
-            // ESP_LOG_BUFFER_HEXDUMP(RX_TASK_TAG, data, rxBytes, ESP_LOG_INFO);
+            ESP_LOGI(TAG, "[RX] %s", data);
 
-            // if (rxBytes >= 4 && data[0] == 0x41 && data[1] == 0x42 && isalpha(data[2]) && isalpha(data[3]))
-            // { // 前俩是0x41 0x42 确保至少有两个字母且都是字母 如发送0x41 0x42 0x41 0x41 则X=0 Y=0
-            //     // 将字母转换为大写，以防串口 数据中的字母是小写形式
-            //     char upperLetter1 = toupper(data[2]);
-            //     char upperLetter2 = toupper(data[3]);
+            // 棋盘坐标系，如A01
+            char col_char;
+            int row_int;
 
-            //     // 计算字母对应的数值，A=1, B=2, ..., Z=26
-            //     int num1 = upperLetter1 - 'A' + 0; // 利用ASCII码差值转换
-            //     int num2 = upperLetter2 - 'A' + 0;
-
-            //     if (num1 == 25 && num2 == 25)
-            //     { // ZZ
-            //     }
-            //     else if (num1 == 24 && num2 == 24)
-            //     { // YY
-            //         // motor_disable();
-            //         set_state(1);
-            //     }
-            //     else
-            //     {
-            //         ESP_LOGI(TAG, "X:%d,Y:%d", num1, num2); // 上位机下棋点的接收
-            //         // grt.play_posx = -((float)num1 * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-            //         grt.play_posx = ((float)num1 * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-            //         grt.play_posy = (float)num2 * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
-            //         grt.cmd = 1;
-            //         // uart_send((const char*)data);
-            //     }
-            // }
-            float x = 0, y = 0; // 棋盘上的某一位置
-            if (sscanf((char *)data, "MOV %f %f", &x, &y) == 2)
+            if (sscanf((char *)data, "MOV %c%d", &col_char, &row_int) == 2)
             {
-                if (x < 0 || y < 0)
+                bool parsed = b_axis2mm_axis(&col_char, row_int);
+                if (parsed)
                 {
-                    ESP_LOGW(TAG, "收到非法坐标: MOV %f %f，已忽略", x, y);
+                    grt.poscmd_flag = true;
+                    ESP_LOGI(TAG_PARSER, "移动至：(%f, %f)", grt.play_posx, grt.play_posx);
                 }
                 else
                 {
-                    ESP_LOGI(TAG, "收到移动命令: MOV %f %f", x, y);
-                    grt.play_posx = ((float)x * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-                    grt.play_posy = (float)y * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
-                    grt.poscmd_flag = true;
+                    ESP_LOGW(TAG_PARSER, "坐标非法，忽略指令");
                 }
             }
-            else if (sscanf((char *)data, "MOVP %f %f", &x, &y) == 2)
+            else if (sscanf((char *)data, "MOVP %c%d", &col_char, &row_int) == 2)
             {
-                grt.pickup_from_box = false;
-                if (y < 0)
+                bool parsed = b_axis2mm_axis(&col_char, row_int);
+                if (parsed)
                 {
-                    ESP_LOGW(TAG, "收到非法坐标: MOV %f %f，已忽略", x, y);
-                }
-                else
-                {
-                    ESP_LOGI(TAG, "收到移动命令: MOV %f %f", x, y);
-                    grt.play_posx = ((float)x * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-                    grt.play_posy = (float)y * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
-                    grt.poscmd_flag = true;
+                    grt.pickup_from_box = false;
                     grt.pickup_flag = true;
-                }
-            }
-            // else if (sscanf((char *)data, "MOVD %f %f", &x, &y) == 2)
-            // {
-            //     if (y < 0)
-            //     {
-            //         ESP_LOGW(TAG, "收到非法坐标: MOV %f %f，已忽略", x, y);
-            //     }
-            //     else
-            //     {
-            //         ESP_LOGI(TAG, "收到移动命令: MOV %f %f", x, y);
-            //         grt.play_posx = ((float)x * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-            //         grt.play_posy = (float)y * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
-            //         grt.poscmd_flag = true;
-            //         grt.drop_flag = true;
-            //     }
-            // }
-            // else if (sscanf((char *)data, "MOVD %f %f", &x, &y) == 2)
-            else if (sscanf((char *)data, "MOVD %f %f", &x, &y) == 2)//跟上位机反了一下
-            {
-
-                if (y < 0 || x < 0)
-                {
-                    ESP_LOGW(TAG, "收到非法坐标: MOVD %f %f，已忽略", x, y);
+                    grt.poscmd_flag = true;
+                    ESP_LOGI(TAG_PARSER, "移动至并拾起棋子：(%f, %f)", grt.play_posx, grt.play_posy);
                 }
                 else
                 {
-                    ESP_LOGI(TAG, "收到放子命令: MOVD %f %f", x, y);
+                    ESP_LOGW(TAG_PARSER, "坐标非法，忽略指令");
+                }
+            }
+            else if (sscanf((char *)data, "MOVD %c%d", &col_char, &row_int) == 2)//跟上位机反了一下
+            {
+                bool parsed = b_axis2mm_axis(&col_char, row_int);
+                if (parsed)
+                {
                     // 如果手中已有棋子，直接执行放子
                     if (grt.chessonhand)
                     {
-                        grt.play_posx = ((float)x * UNIT_DISTANCE_X + ORIGIN_OFFSET_X);
-                        grt.play_posy = (float)y * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
-                        grt.poscmd_flag = true;
                         grt.drop_flag = true;
+                        grt.poscmd_flag = true;
+                        ESP_LOGI(TAG_PARSER, "移动至并放下棋子：(%f, %f)", grt.play_posx, grt.play_posy);
                     }
+                    // 否则保存为待处理 MOVD，先去棋盒取子，取得后会自动执行
                     else
                     {
-                        // 否则保存为待处理 MOVD，先去棋盒取子，取得后会自动执行
                         grt.pending_movd = true;
-                        grt.pending_movd_x = x;
-                        grt.pending_movd_y = y;
+                        grt.pending_movd_x = grt.play_posx;
+                        grt.pending_movd_y = grt.play_posy;
                         grt.pickup_from_box = true;
                         grt.pickup_flag = true;
-                        ESP_LOGI(TAG, "手中无子，已加入待处理 MOVD，并触发 GETCHESS");
+                        ESP_LOGI(TAG, "手中无子，已加入待处理MOVD：(%f, %f)，并触发GETCHESS", grt.pending_movd_x, grt.pending_movd_y);
                     }
+                }
+                else
+                {
+                    ESP_LOGW(TAG_PARSER, "坐标非法，忽略指令");
                 }
             }
             else if (strcmp((char *)data, "ORG") == 0)
             {
                 grt.origin_flag = true;
+                ESP_LOGI(TAG_PARSER, "回零");
             }
             else if (strcmp((char *)data, "STORGST") == 0) // 手动设置单圈零点位置开始
             {
                 grt.setorigin_flags.start = true;
+                ESP_LOGI(TAG_PARSER, "手动设置单圈零点位置开始");
             }
             else if (strcmp((char *)data, "STORGFIN") == 0) // 手动设置单圈零点位置完成
             {
                 grt.setorigin_flags.finish = true;
+                ESP_LOGI(TAG_PARSER, "手动设置单圈零点位置完成");
             }
             else if (strcmp((char *)data, "TESTST") == 0)
             {
                 grt.test_flag = 1;
+                ESP_LOGI(TAG_PARSER, "测试开始");
             }
             else if (strcmp((char *)data, "TESTFIN") == 0)
             {
-                grt.test_flag = 2;
+                grt.test_flag = 0;
+                ESP_LOGI(TAG_PARSER, "测试结束");
             }
             else if (strcmp((char *)data, "PICKUP") == 0)
             {
+                if (grt.chessonhand)
+                {
+                    ESP_LOGW(TAG_PARSER, "手中有子，忽略指令");
+                }
+                else
+                {
                 grt.pickup_from_box = false;
                 grt.pickup_flag = true;
+                ESP_LOGI(TAG_PARSER, "拾起棋子");
+                }
             }
             else if (strcmp((char *)data, "DROP") == 0)
             {
                 grt.drop_flag = true;
+                ESP_LOGI(TAG_PARSER, "放下棋子");
             }
             else if (strcmp((char *)data, "GETCHESS") == 0)
             {
+                if (grt.chessonhand)
+                {
+                    ESP_LOGW(TAG_PARSER, "手中有子，忽略指令");
+                }
+                else
+                {
                 grt.pickup_from_box = true;
                 grt.pickup_flag = true;
+                ESP_LOGI(TAG_PARSER, "从棋盒中拾起棋子");
+                }
             }
         }
     }

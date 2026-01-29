@@ -442,7 +442,6 @@ void motor_tx_send(uint8_t *data, uint8_t len)
 // 电机串口接收任务
 void motor_rx_task(void *arg)
 {
-    esp_log_level_set(TAG, ESP_LOG_INFO);
     uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
     ESP_LOGE(TAG, "电机串口接收启动");
     while (1)
