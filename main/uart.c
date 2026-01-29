@@ -16,6 +16,7 @@
 #include "motor.h"
 #include "uart.h"
 #include "main.h"
+#include "sigan.h"
 
 static const char *TAG = "UART";
 static const int RX_BUF_SIZE = 1024;
@@ -94,6 +95,7 @@ void rx_task(void *arg)
             //     }
             // }
             float x = 0, y = 0; // 棋盘上的某一位置
+            float val = 0;
             if (sscanf((char *)data, "MOV %f %f", &x, &y) == 2)
             {
                 if (x < 0 || y < 0)
@@ -170,6 +172,20 @@ void rx_task(void *arg)
                     }
                 }
             }
+            //丝杆调试指令 (up / down) 
+            else if (sscanf((char *)data, "UP %f", &val) == 1)
+            {
+                ESP_LOGI(TAG, "调试: 丝杆上升 %.2f mm", val);
+                uart_send("UP OK\n");
+                sigan_move_up(val); // 调用 sigan.c 执行
+            }
+            else if (sscanf((char *)data, "DOWN %f", &val) == 1)
+            {
+                ESP_LOGI(TAG, "调试: 丝杆下降 %.2f mm", val);
+                uart_send("DOWN OK\n");
+                sigan_move_down(val); // 调用 sigan.c 执行
+            }
+            // -------------------------------------------------------------
             else if (strcmp((char *)data, "ORG") == 0)
             {
                 grt.origin_flag = true;

@@ -12,6 +12,7 @@
 #include "driver/gpio.h"
 #include "driver/uart.h"
 #include "driver/ledc.h"
+#include "sigan.h"
 
 #include "main.h"
 #include "motor.h"
