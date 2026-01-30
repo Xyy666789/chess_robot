@@ -62,7 +62,7 @@ bool inverse_kinematics(const ArmConfig* arm, Point2D target,
     }
 
     result->theta1 = theta1 * 180.0 / M_PI;
-    result->theta2 = theta2 * 180.0 / M_PI / GEAR_RATIO; // 输出角度并考虑齿轮比
+    result->theta2 = theta2 * 180.0 / M_PI; // 输出角度并考虑齿轮比
     return true;
 }
 

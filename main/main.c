@@ -90,12 +90,12 @@ void app_main(void)
     grt.arm_config.theta2_min = 10;  // 关节角度限制
     // esp_log_level_set("*", ESP_LOG_NONE); //关闭日志打印
     sigan_init();                                                              // 确保丝杆初始化
-    xTaskCreate(Sigan_Control_Task, "Sigan_Control_Task", 4096, NULL, 5, NULL);// 启动丝杆控制任务
     gpio_init();                                                               // 初始化输入输出
     uart_init();                                                               // 初始化串口
     motor_uart_init();                                                         // 初始化电机控制串口
     ZMOT_init();                                                               // 初始化电机控制参数
     motor_gpio_init();                                                         // 初始化28BYJ电机GPIO
+    xTaskCreate(Sigan_Control_Task, "Sigan_Control_Task", 4096, NULL, 5, NULL);// 启动丝杆控制任务
     xTaskCreate(Arm_motion_test, "Arm_motion_test", 1024 * 20, NULL, 5, NULL); // 创建臂部运动测试线程
     xTaskCreate(Detection_task, "Detection_task", 1024 * 6, NULL, 5, NULL);    // 创建输入检测线程
     // xTaskCreate(play_chess_task, "play_chess_task", 1024 * 20, NULL, 5, NULL); //创建下棋线程
