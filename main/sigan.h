@@ -1,3 +1,4 @@
+#pragma once
 #ifndef __SIGAN_H__
 #define __SIGAN_H__
 

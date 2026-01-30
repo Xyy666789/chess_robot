@@ -173,17 +173,17 @@ void rx_task(void *arg)
                 }
             }
             //丝杆调试指令 (up / down) 
-            else if (sscanf((char *)data, "UP %f", &val) == 1)
+            else if (sscanf((char *)data, "up %f", &val) == 1)
             {
-                ESP_LOGI(TAG, "调试: 丝杆上升 %.2f mm", val);
-                uart_send("UP OK\n");
-                sigan_move_up(val); // 调用 sigan.c 执行
+                grt.sigan_val = val;      // 保存数值
+                grt.sigan_up_flag = true; //上升
+                uart_send("UP RECEIVED\n");
             }
-            else if (sscanf((char *)data, "DOWN %f", &val) == 1)
+            else if (sscanf((char *)data, "down %f", &val) == 1)
             {
-                ESP_LOGI(TAG, "调试: 丝杆下降 %.2f mm", val);
-                uart_send("DOWN OK\n");
-                sigan_move_down(val); // 调用 sigan.c 执行
+                grt.sigan_val = val;        // 保存数值
+                grt.sigan_down_flag = true; // 虾酱
+                uart_send("DOWN RECEIVED\n");
             }
             // -------------------------------------------------------------
             else if (strcmp((char *)data, "ORG") == 0)

@@ -88,6 +88,9 @@ typedef struct {
     uint8_t pickup_retry_limit; // 最大重试次数
     bool getchessarived;//抓取时是否到达指定位置
     bool chessonhand;//手中有棋子标志
+    bool sigan_up_flag;    // 丝杆上升标志位
+    bool sigan_down_flag;  // 丝杆下降标志位
+    float sigan_val;       // 丝杆移动的距离数值
 } go_robot_t;
 
 extern go_robot_t grt;

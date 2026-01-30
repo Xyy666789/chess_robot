@@ -26,6 +26,32 @@ static const char *TAG = "MAIN";
 
 go_robot_t grt;
 
+void Sigan_Control_Task(void *arg)
+{
+    TickType_t xLastWakeTime;
+    const TickType_t xFrequency = pdMS_TO_TICKS(50); // 每50ms检测一次标志位
+    xLastWakeTime = xTaskGetTickCount();
+
+    while (1)
+    {
+        // 检测上升标志位
+        if (grt.sigan_up_flag) 
+        {
+            ESP_LOGI("SIGAN_TASK", "执行上升动作: %.2f mm", grt.sigan_val);
+            sigan_move_up(grt.sigan_val); 
+            grt.sigan_up_flag = false;    
+        }
+        // 检测下降标志位
+        if (grt.sigan_down_flag) 
+        {
+            ESP_LOGI("SIGAN_TASK", "执行下降动作: %.2f mm", grt.sigan_val);
+            sigan_move_down(grt.sigan_val); 
+            grt.sigan_down_flag = false;    
+        }
+        vTaskDelayUntil(&xLastWakeTime, xFrequency);
+    }
+}
+
 void app_main(void)
 {
     ESP_LOGI("APP_MAIN", "APP Start......");
@@ -63,6 +89,8 @@ void app_main(void)
     grt.arm_config.theta2_max = 160; // 到时候设计的20度为归零原点 所以所有的都要减20度
     grt.arm_config.theta2_min = 10;  // 关节角度限制
     // esp_log_level_set("*", ESP_LOG_NONE); //关闭日志打印
+    sigan_init();                                                              // 确保丝杆初始化
+    xTaskCreate(Sigan_Control_Task, "Sigan_Control_Task", 4096, NULL, 5, NULL);// 启动丝杆控制任务
     gpio_init();                                                               // 初始化输入输出
     uart_init();                                                               // 初始化串口
     motor_uart_init();                                                         // 初始化电机控制串口
