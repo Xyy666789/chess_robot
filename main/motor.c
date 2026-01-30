@@ -19,8 +19,9 @@
 
 static const int RX_BUF_SIZE = 1024;
 static const int TX_BUF_SIZE = 1024;
-
-static const char *TAG = "电机";
+static const char *TAG_TX = "COM_MOT_TX";
+static const char *TAG_RX = "COM_MOT_RX";
+static const char *TAG_CTL = "MOT_CTL";
 ZDTMOT_t ZMOT;
 motor_t motor[MOT_COT];
 
@@ -193,7 +194,7 @@ void zmot_cmd(void *arg)
                 if (cmd_disable[i] == 1)
                 {
                     ZMOT.enable(i, 0);
-                    ESP_LOGE(TAG, "电机%d失能命令已发送", i);
+                    ESP_LOGE(TAG_CTL, "电机%d失能命令已发送", i);
                     motor[i].ack = 0;
                     cmd_disable[i] = 2;
                     overtime = 0;
@@ -211,7 +212,7 @@ void zmot_cmd(void *arg)
                     if (overtime >= 100)
                     {
                         cmd_disable[i] = 1;
-                        ESP_LOGE(TAG, "电机%d失能ack回复超时, 跳过此电机", i);
+                        ESP_LOGE(TAG_CTL, "电机%d失能ack回复超时, 跳过此电机", i);
                     }
                 }
                 else
@@ -269,7 +270,7 @@ void zmot_cmd(void *arg)
                 {
                     ZMOT.set_pos(i, motor[i].pos_dir, motor[i].tar_sp, motor[i].acc, motor[i].tar_pul, motor[i].abs_mode, motor[i].pos_sync);
                     // ZMOT.set_pos(i, motor[i].pos_dir, motor[i].acc, motor[i].acc, motor[i].tar_sp, motor[i].tar_pos, motor[i].abs_mode, motor[i].pos_sync);
-                    ESP_LOGE(TAG, "电机%d位置命令已发送,", i);
+                    ESP_LOGE(TAG_CTL, "电机%d位置命令已发送,", i);
                     motor[i].ack = 0;
                     cmd_pos[i] = 2;
                     overtime = 0;
@@ -289,7 +290,7 @@ void zmot_cmd(void *arg)
                     if (overtime >= 100)
                     {
                         cmd_pos[i] = 1;
-                        ESP_LOGE(TAG, "电机%d位置命令回复超时, 重新发送一次", i);
+                        ESP_LOGE(TAG_CTL, "电机%d位置命令回复超时, 重新发送一次", i);
                     }
                 }
                 else
@@ -351,7 +352,7 @@ void sync_while(void)
             if (cmd_sync == 1)
             {
                 ZMOT.sync(0);
-                ESP_LOGE(TAG, "已发送SYNC命令");
+                ESP_LOGE(TAG_CTL, "已发送SYNC命令");
                 motor[0].ack = 0;
                 cmd_sync = 2;
                 overtime = 0;
@@ -369,7 +370,7 @@ void sync_while(void)
                 if (overtime >= 100)
                 {
                     cmd_sync = 1;
-                    ESP_LOGE(TAG, "SYNC回复超时, 重新发送一次");
+                    ESP_LOGE(TAG_CTL, "SYNC回复超时, 重新发送一次");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -387,7 +388,7 @@ void set_origion_pos_while(void)
             if (cmd_set_origin == 1)
             {
                 ZMOT.set_origion_pos();
-                ESP_LOGE(TAG, "已发送原点设置命令");
+                ESP_LOGE(TAG_CTL, "已发送原点设置命令");
                 motor[0].ack = 0;
                 cmd_set_origin = 2;
                 overtime = 0;
@@ -405,7 +406,7 @@ void set_origion_pos_while(void)
                 if (overtime >= 100)
                 {
                     cmd_set_origin = 1;
-                    ESP_LOGE(TAG, "原点设置回复超时, 重新发送一次");
+                    ESP_LOGE(TAG_CTL, "原点设置回复超时, 重新发送一次");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -436,14 +437,14 @@ void motor_uart_init(void)
 void motor_tx_send(uint8_t *data, uint8_t len)
 {
     uart_write_bytes(UART_NUM_2, data, len);
-    ESP_LOG_BUFFER_HEX(TAG, data, len);
+    ESP_LOG_BUFFER_HEX(TAG_TX, data, len);
 }
 
 // 电机串口接收任务
 void motor_rx_task(void *arg)
 {
     uint8_t *data = (uint8_t *)malloc(RX_BUF_SIZE + 1);
-    ESP_LOGE(TAG, "电机串口接收启动");
+    // ESP_LOGI(TAG_RX, "电机串口接收启动");
     while (1)
     {
         const int rxBytes = uart_read_bytes(UART_NUM_2, data, RX_BUF_SIZE, 100 / portTICK_PERIOD_MS);//100
@@ -451,7 +452,7 @@ void motor_rx_task(void *arg)
         {
             data[rxBytes] = 0;
             // ESP_LOGE(TAG, "收到电机串口消息 %d bytes:", rxBytes);
-            // ESP_LOG_BUFFER_HEX(TAG, data, rxBytes);
+            ESP_LOG_BUFFER_HEX(TAG_RX, data, rxBytes);
             // ESP_LOG_BUFFER_HEXDUMP(TAG, data, rxBytes, ESP_LOG_INFO);
             grt.mot_wait = 0;
             if (rxBytes >= 4 && data[2] == 0x02 && data[3] == 0x6B)
@@ -604,7 +605,7 @@ void set_pos(uint8_t m_num, float pos, uint16_t sp)
     motor[m_num].tar_pos = pos;
     motor[m_num].tar_sp = sp;
     motor[m_num].err_pos = pos - motor[m_num].cur_pos;
-    ESP_LOGI(TAG, "给定目标位置：%f, 速度：%d, 差值%f", motor[m_num].tar_pos, motor[m_num].tar_sp, motor[m_num].err_pos);
+    ESP_LOGI(TAG_CTL, "给定目标位置：%f, 速度：%d, 差值%f", motor[m_num].tar_pos, motor[m_num].tar_sp, motor[m_num].err_pos);
 }
 
 // 设置目标角度
@@ -639,7 +640,7 @@ void ZDTMOT_enable(uint8_t adr, uint8_t state)
 void ZDTMOT_sp(uint8_t adr, uint8_t dir, int16_t sp, uint8_t acc, uint8_t sync)
 {
     uint8_t txbuff[8] = {adr + 1, 0xF6, dir, (uint8_t)(sp >> 8), (uint8_t)sp, acc, sync, 0x6B};
-    ESP_LOG_BUFFER_HEX(TAG, txbuff, 8);
+    ESP_LOG_BUFFER_HEX(TAG_TX, txbuff, 8);
     motor_tx_send((uint8_t *)txbuff, 8);
 }
 
@@ -671,7 +672,7 @@ void ZDTMOT_sync(uint8_t adr)
 void ZDTMOT_origin(uint8_t adr, uint8_t mode, uint8_t sync)
 {
     uint8_t txbuff[5] = {adr + 1, 0x9A, mode, sync, 0x6B};
-    ESP_LOG_BUFFER_HEX(TAG, txbuff, 5);
+    ESP_LOG_BUFFER_HEX(TAG_TX, txbuff, 5);
     motor_tx_send((uint8_t *)txbuff, 5);
 }
 

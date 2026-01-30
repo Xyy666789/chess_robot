@@ -4,7 +4,7 @@
 #define MOTOR_TX_PIN GPIO_NUM_17
 #define MOTOR_RX_PIN GPIO_NUM_18
 
-#define MOT_COT 4 //步进电机数量
+#define MOT_COT 2 //步进电机数量
 #define SPR_XY 3200 //XY电机每圈脉冲数//完整STEPS_PER_REVOLUTION
 // #define DPR_X 40 //X电机每圈移动距离，毫米//完整DISTANCE_PER_REVOLUTION
 // #define DPR_Y 20 //Y电机每圈移动距离，毫米//完整DISTANCE_PER_REVOLUTION

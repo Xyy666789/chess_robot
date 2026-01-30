@@ -27,9 +27,9 @@ go_robot_t grt;
 
 void app_main(void)
 {
-    ESP_LOGI("APP_MAIN", "APP Start......");
+    ESP_LOGI(TAG, "APP Start......");
     /*初始化flash*/
-    ESP_LOGI("APP_MAIN", "初始化FLASH......");
+    ESP_LOGI(TAG, "初始化FLASH......");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
     {
@@ -48,6 +48,7 @@ void app_main(void)
     const TickType_t xFrequency = 4000 / portTICK_PERIOD_MS; // 打印间隔时间，ms
     xLastWakeTime = xTaskGetTickCount();                     // 初始化上一次唤醒时间
 
+    ESP_LOGI(TAG, "初始化程序......");
     grt.air_duty = 100; // 默认气泵占空比，80%
     grt.move_order = 0; // 默认先后手·
     grt.pending_movd = false;
@@ -77,6 +78,8 @@ void app_main(void)
     // xTaskCreate(soft_i2c_task1, "soft_i2c_task1", 1024 * 6, NULL, 10, NULL);//创建i2c线程，读取APDS9960传感器数据
     // xTaskCreatePinnedToCore(soft_i2c_task2, "soft_i2c_task2", 1024 * 6, NULL, 11, NULL, 1);//创建i2c线程，读取APDS9960传感器数据，使用核心1
     xTaskCreate(zmot_cmd, "zmot_cmd", 1024 * 20, NULL, 21, NULL); // 创建电机命令控制线程
+    ESP_LOGI(TAG, "初始化完成");
+
     ESP_LOGI(TAG, "上电时间: %lld us", esp_timer_get_time());
 
     while (1)

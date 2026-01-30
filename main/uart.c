@@ -17,8 +17,9 @@
 #include "uart.h"
 #include "main.h"
 
-static const char *TAG = "COM_HOST";      // 与上位机通信的端口使用该TAG记录日志
-static const char *TAG_PARSER = "CMD_PARSER";
+static const char *TAG_TX = "COM_HOST_TX";      // 与上位机通信的TX端口使用该TAG记录日志
+static const char *TAG_RX = "COM_HOST_RX";      // 与上位机通信的RX端口使用该TAG记录日志
+static const char *TAG_PARSER = "CMD_PARSER";   // 解析来自上位机的指令使用该TAG记录日志
 static const int RX_BUF_SIZE = 1024;
 static const int TX_BUF_SIZE = 1024;
 #define TXD_PIN (GPIO_NUM_4)
@@ -71,7 +72,7 @@ void uart_init(void)
 void uart_send(const char *data)
 {
     uart_write_bytes(UART_NUM_1, data, strlen(data));
-    ESP_LOGI(TAG, "[TX] %s", data);
+    ESP_LOGI(TAG_TX, "%s", data);
 }
 
 void rx_task(void *arg)
@@ -83,7 +84,7 @@ void rx_task(void *arg)
         if (rxBytes > 0)
         {
             data[rxBytes] = 0;
-            ESP_LOGI(TAG, "[RX] %s", data);
+            ESP_LOGI(TAG_RX, "%s", data);
 
             // 棋盘坐标系，如A01
             char col_char;
@@ -137,7 +138,7 @@ void rx_task(void *arg)
                         grt.pending_movd_y = grt.play_posy;
                         grt.pickup_from_box = true;
                         grt.pickup_flag = true;
-                        ESP_LOGI(TAG, "手中无子，已加入待处理MOVD：(%f, %f)，并触发GETCHESS", grt.pending_movd_x, grt.pending_movd_y);
+                        ESP_LOGI(TAG_PARSER, "手中无子，已加入待处理 MOVD：(%f, %f)，并触发 GETCHESS", grt.pending_movd_x, grt.pending_movd_y);
                     }
                 }
                 else
@@ -200,6 +201,10 @@ void rx_task(void *arg)
                 grt.pickup_flag = true;
                 ESP_LOGI(TAG_PARSER, "从棋盒中拾起棋子");
                 }
+            }
+            else
+            {
+                ESP_LOGW(TAG_PARSER, "未知格式，忽略指令");
             }
         }
     }
