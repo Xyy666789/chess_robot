@@ -3,9 +3,9 @@
 #define __SIGAN_H__
 
 // 1. 硬件引脚
-#define SIGAN_PIN_EN    35
-#define SIGAN_PIN_STEP  36
-#define SIGAN_PIN_DIR   37
+#define SIGAN_PIN_EN    6
+#define SIGAN_PIN_STEP  7
+#define SIGAN_PIN_DIR   15
 
 // 2. 机械参数
 #define SIGAN_LEAD_MM      3.3f   // 导程

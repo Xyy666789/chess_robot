@@ -37,7 +37,7 @@ static void sigan_step_run(int steps, int dir)
         ets_delay_us(SIGAN_PULSE_DELAY);
         
         // 防止长距离移动时卡死系统
-        if (i % 500 == 0) vTaskDelay(1);
+        if (i % 100 == 0) vTaskDelay(1);
     }
     
     gpio_set_level(SIGAN_PIN_EN, 1); // 释放省电
