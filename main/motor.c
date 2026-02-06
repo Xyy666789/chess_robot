@@ -38,6 +38,53 @@ uint8_t cmd_sync = 0;               // 多电机同步运动
 uint8_t cmd_set_origin = 0;         // 原点设置命令标志
 uint8_t cmd_type = 0;
 
+static cmd_result_t process_ack_logic(int mot_idx, uint8_t *cmd_flag, int timeout_ticks, bool retry_on_timeout, const char *cmd_name)
+{
+    // 1. 检查致命错误 (ACK_CONDITION_FAIL & ACK_CMD_ERROR)
+    // 遇到此类错误，不再重试，直接报错并终止当前命令
+    if (motor[mot_idx].ack == ACK_CONDITION_FAIL || motor[mot_idx].ack == ACK_CMD_ERROR)
+    {
+        ESP_LOGE(TAG_CTL, "电机 %d %s失败! 错误码: %d (%s)", 
+                 mot_idx, cmd_name, motor[mot_idx].ack,
+                 motor[mot_idx].ack == ACK_CONDITION_FAIL ? "条件不满足" : "命令错误");
+        
+        motor[mot_idx].ack = ACK_NOT_RECEIVED;
+        *cmd_flag = CMD_IDLE; // 终止命令
+        return CMD_RES_ERROR;
+    }
+
+    // 2. 检查成功 (ACK_OK)
+    if (motor[mot_idx].ack == ACK_OK)
+    {
+        motor[mot_idx].ack = ACK_NOT_RECEIVED;
+        *cmd_flag = CMD_IDLE; // 命令完成，清除标志
+        // ESP_LOGD(TAG_CTL, "电机 %d [%s] ACK确认", mot_idx, cmd_name);
+        return CMD_RES_SUCCESS;
+    }
+
+    // 3. 处理等待与超时
+    vTaskDelay(pdMS_TO_TICKS(10));
+    overtime++;
+
+    if (overtime >= timeout_ticks)
+    {
+        if (retry_on_timeout)
+        {
+            *cmd_flag = CMD_PENDING; // 再次发送
+            ESP_LOGW(TAG_CTL, "电机 %d %s ACK超时, 正在重试...", mot_idx, cmd_name);
+            return CMD_RES_RETRY;
+        }
+        else
+        {
+            *cmd_flag = CMD_IDLE; // 终止命令
+            ESP_LOGW(TAG_CTL, "电机 %d %s ACK超时, 已跳过", mot_idx, cmd_name);
+            return CMD_RES_ERROR;
+        }
+    }
+
+    return CMD_RES_WAITING;
+}
+
 // 电机命令发送控制
 void zmot_cmd(void *arg)
 {
@@ -48,69 +95,35 @@ void zmot_cmd(void *arg)
         {
             while (cmd_stop[i])
             {
-                if (cmd_stop[i] == 1)
+                if (cmd_stop[i] == CMD_PENDING)
                 {
                     ZMOT.stop(i, 0);
-                    cmd_stop[i] = 2;
-                    motor[i].ack = 0;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_stop[i] = CMD_WAITING_FOR_ACK; // 进入等待状态
                     overtime = 0;
                 }
-                else if (cmd_stop[i] == 2)
+                else if (cmd_stop[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        cmd_stop[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_stop[i] = 1;
-                        // ESP_LOGE(TAG, "电机%d解除堵转保护ack回复超时, 跳过此电机", i);
-                    }
+                    process_ack_logic(i, &cmd_stop[i], 100, false, "立即停止");
                 }
-                else
-                {
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
-        // 中断复位命令
+        // 中断复位命令控制
         for (int i = 0; i < MOT_COT; i++)
         {
             while (cmd_int_ori[i])
             {
-                if (cmd_int_ori[i] == 1)
+                if (cmd_int_ori[i] == CMD_PENDING)
                 {
                     ZMOT.forced_int(i);
-                    cmd_int_ori[i] = 2;
-                    motor[i].ack = 0;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_int_ori[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_int_ori[i] == 2)
+                else if (cmd_int_ori[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        cmd_int_ori[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_int_ori[i] = 1;
-                        // ESP_LOGE(TAG, "电机%d解除堵转保护ack回复超时, 跳过此电机", i);
-                    }
+                    process_ack_logic(i, &cmd_int_ori[i], 100, false, "中断复位");
                 }
-                else
-                {
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
         // 解除堵转保护命令控制
@@ -118,34 +131,17 @@ void zmot_cmd(void *arg)
         {
             while (cmd_rel[i])
             {
-                if (cmd_rel[i] == 1)
+                if (cmd_rel[i] == CMD_PENDING)
                 {
                     ZMOT.unlock(i);
-                    cmd_rel[i] = 2;
-                    motor[i].ack = 0;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_rel[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_rel[i] == 2)
+                else if (cmd_rel[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        cmd_rel[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_rel[i] = 1;
-                        // ESP_LOGE(TAG, "电机%d解除堵转保护ack回复超时, 跳过此电机", i);
-                    }
+                    process_ack_logic(i, &cmd_rel[i], 100, false, "解除堵转");
                 }
-                else
-                {
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
         // 使能命令控制
@@ -153,228 +149,119 @@ void zmot_cmd(void *arg)
         {
             while (cmd_enab[i])
             {
-                if (cmd_enab[i] == 1)
+                if (cmd_enab[i] == CMD_PENDING)
                 {
                     ZMOT.enable(i, 1);
-                    // ESP_LOGE(TAG, "电机%d使能命令已发送", i);
-                    motor[i].ack = 0;
-                    cmd_enab[i] = 2;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_enab[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_enab[i] == 2)
+                else if (cmd_enab[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        cmd_enab[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_enab[i] = 1;
-                        // ESP_LOGE(TAG, "电机%d使能ack回复超时, 跳过此电机", i);
-                    }
+                    process_ack_logic(i, &cmd_enab[i], 100, false, "使能");
                 }
-                else
-                {
-                    // ESP_LOGE(TAG, "电机%d无动作，退出使能命令", i);
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
-
         // 失能命令控制
         for (int i = 0; i < MOT_COT; i++)
         {
             while (cmd_disable[i])
             {
-                if (cmd_disable[i] == 1)
+                if (cmd_disable[i] == CMD_PENDING)
                 {
                     ZMOT.enable(i, 0);
-                    ESP_LOGE(TAG_CTL, "电机%d失能命令已发送", i);
-                    motor[i].ack = 0;
-                    cmd_disable[i] = 2;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_disable[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_disable[i] == 2)
+                else if (cmd_disable[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        cmd_disable[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_disable[i] = 1;
-                        ESP_LOGE(TAG_CTL, "电机%d失能ack回复超时, 跳过此电机", i);
-                    }
+                    process_ack_logic(i, &cmd_disable[i], 100, false, "失能");
                 }
-                else
-                {
-                    // ESP_LOGE(TAG, "电机%d无动作，退出失能命令", i);
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
-        /* 复位命令控制*/
+        // 回零命令控制
         for (int i = 0; i < MOT_COT; i++)
         {
             while (cmd_ori[i])
             {
-                if (cmd_ori[i] == 1)
+                if (cmd_ori[i] == CMD_PENDING)
                 {
                     ZMOT.origin(i, motor[i].omode, 1);
-                    // ESP_LOGI(TAG, "电机%d复位命令已发送", i);
-                    motor[i].ack = 0;
-                    cmd_ori[i] = 2;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_ori[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
+                    ESP_LOGI(TAG_CTL, "电机 %d 复位命令已发送", i);
                 }
-                else if (cmd_ori[i] == 2)
-                { // ESP_LOGE(TAG, "电机%d等待ack", i);
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        // ESP_LOGE(TAG, "电机%dack收到", i);
-                        cmd_ori[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_ori[i] = 1;
-                        // ESP_LOGE(TAG, "电机%d复位ack回复超时, 重新发送一次", i);
-                    }
-                }
-                else
+                else if (cmd_ori[i] == CMD_WAITING_FOR_ACK)
                 {
-                    // ESP_LOGE(TAG, "电机%d无动作，退出复位命令", i);
-                    break;
+                    process_ack_logic(i, &cmd_ori[i], 100, true, "回零");
                 }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
-        /* 位置命令控制*/
+        // 位置命令控制
         for (int i = 0; i < MOT_COT; i++)
         {
             while (cmd_pos[i])
             {
-                if (cmd_pos[i] == 1)
+                if (cmd_pos[i] == CMD_PENDING)
                 {
-                    ZMOT.set_pos(i, motor[i].pos_dir, motor[i].tar_sp, motor[i].acc, motor[i].tar_pul, motor[i].abs_mode, motor[i].pos_sync);
-                    // ZMOT.set_pos(i, motor[i].pos_dir, motor[i].acc, motor[i].acc, motor[i].tar_sp, motor[i].tar_pos, motor[i].abs_mode, motor[i].pos_sync);
-                    ESP_LOGE(TAG_CTL, "电机%d位置命令已发送,", i);
-                    motor[i].ack = 0;
-                    cmd_pos[i] = 2;
+                    ZMOT.set_pos(i, motor[i].pos_dir, motor[i].tar_sp, motor[i].acc, 
+                                 motor[i].tar_pul, motor[i].abs_mode, motor[i].pos_sync);
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_pos[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_pos[i] == 2)
+                else if (cmd_pos[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
+                    cmd_result_t res = process_ack_logic(i, &cmd_pos[i], 100, false, "位置控制");
+                    if (res == CMD_RES_SUCCESS)
                     {
-                        motor[i].ack = 0;
                         motor[i].confirm = 1;
-                        // ESP_LOGE(TAG, "电机%dack收到", i);
-                        cmd_pos[i] = 0;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 100)
-                    {
-                        cmd_pos[i] = 1;
-                        ESP_LOGE(TAG_CTL, "电机%d位置命令回复超时, 重新发送一次", i);
                     }
                 }
-                else
-                {
-                    // ESP_LOGE(TAG, "电机%d无动作，退出位置命令", i);
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
-        sync_while();
-        /* 状态查询命令 */
+        // 同步命令控制
+        while (cmd_sync)
+        {
+            if (cmd_sync == CMD_PENDING)
+            {
+                // 此处的 0 并非指程序内部的电机索引，而是广播
+                ZMOT.sync(0);
+                motor[0].ack = ACK_NOT_RECEIVED;
+                cmd_sync = CMD_WAITING_FOR_ACK;
+                overtime = 0;
+                ESP_LOGI(TAG_CTL, "电机同步命令已发送");
+            }
+            else if (cmd_sync == CMD_WAITING_FOR_ACK)
+            {
+                // 电机同步命令为广播发送。广播发送命令时，只有电机 01 会回复 ACK
+                process_ack_logic(0, &cmd_sync, 100, true, "同步");
+            }
+        }
+        // 状态查询命令
         for (int i = 0; i < MOT_COT; i++)
         {
-            cmd_sta[i] = 1;
+            // 每次循环自动发起查询
+            cmd_sta[i] = CMD_PENDING; 
             while (cmd_sta[i])
             {
-                if (cmd_sta[i] == 1)
+                if (cmd_sta[i] == CMD_PENDING)
                 {
                     ZMOT.get_sys_status(i);
-                    // ESP_LOGE(TAG, "电机%d获取状态信息命令已发送", i);
-                    motor[i].ack = 0;
-                    cmd_sta[i] = 2;
+                    motor[i].ack = ACK_NOT_RECEIVED;
+                    cmd_sta[i] = CMD_WAITING_FOR_ACK;
                     overtime = 0;
                 }
-                else if (cmd_sta[i] == 2)
+                else if (cmd_sta[i] == CMD_WAITING_FOR_ACK)
                 {
-                    if (motor[i].ack == 1)
-                    {
-                        motor[i].ack = 0;
-                        // ESP_LOGE(TAG, "电机%dack收到", i);
-                        cmd_sta[i] = 3;
-                        break;
-                    }
-                    vTaskDelay(pdMS_TO_TICKS(10));
-                    overtime++;
-                    if (overtime >= 20)//电机状态获取间隔太长导致响应速度慢？
-                    {
-                        cmd_sta[i] = 0;
-                        // ESP_LOGE(TAG, "电机%d状态信息获取超时, 跳过此电机", i);
-                        break;
-                    }
+                    // 原话：间隔太长导致电机回复变慢？
+                    process_ack_logic(i, &cmd_sta[i], 20, false, "状态查询");
                 }
-                vTaskDelay(pdMS_TO_TICKS(10));
             }
         }
         vTaskDelay(pdMS_TO_TICKS(10));
-    }
-}
-
-// SYNC同步命令控制
-void sync_while(void)
-{
-    // ESP_LOGE(TAG, "SYNC命令检查");
-    if (cmd_sync == 1)
-    {
-        while (1)
-        {
-            if (cmd_sync == 1)
-            {
-                ZMOT.sync(0);
-                ESP_LOGE(TAG_CTL, "已发送SYNC命令");
-                motor[0].ack = 0;
-                cmd_sync = 2;
-                overtime = 0;
-            }
-            if (cmd_sync == 2)
-            {
-                if (motor[0].ack == 1)
-                {
-                    cmd_sync = 0;
-                    motor[0].ack = 0;
-                    break;
-                }
-                vTaskDelay(pdMS_TO_TICKS(10));
-                overtime++;
-                if (overtime >= 100)
-                {
-                    cmd_sync = 1;
-                    ESP_LOGE(TAG_CTL, "SYNC回复超时, 重新发送一次");
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
     }
 }
 
@@ -388,7 +275,7 @@ void set_origion_pos_while(void)
             if (cmd_set_origin == 1)
             {
                 ZMOT.set_origion_pos();
-                ESP_LOGE(TAG_CTL, "已发送原点设置命令");
+                ESP_LOGI(TAG_CTL, "已发送原点设置命令");
                 motor[0].ack = 0;
                 cmd_set_origin = 2;
                 overtime = 0;
@@ -406,7 +293,7 @@ void set_origion_pos_while(void)
                 if (overtime >= 100)
                 {
                     cmd_set_origin = 1;
-                    ESP_LOGE(TAG_CTL, "原点设置回复超时, 重新发送一次");
+                    ESP_LOGW(TAG_CTL, "原点设置回复超时, 重新发送一次");
                 }
             }
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -440,6 +327,135 @@ void motor_tx_send(uint8_t *data, uint8_t len)
     ESP_LOG_BUFFER_HEX(TAG_TX, data, len);
 }
 
+// 电机回复帧合法性判断
+static bool reply_frame_valid(uint8_t *data, int len)
+{
+    if (len < 4) return false;                              // 至少长 4 字节
+    if (data[len - 1] != 0x6B) return false;                // 校验字节 0x6B
+    if (data[0] == 0 || data[0] > MOT_COT) return false;    // 电机地址合法性
+    return true;
+}
+
+// 判断指令是否为状态读取类指令
+static bool is_query_cmd(uint8_t cmd)
+{
+    switch (cmd)
+    {
+    case 0x43:   // 读取系统状态参数
+    case 0x42:   // 读取驱动配置参数
+    case 0x3A:   // 读取电机状态标志位
+    case 0x37:   // 读取电机位置误差
+    case 0x36:   // 读取电机实时位置
+    case 0x35:   // 读取电机实时转速
+    case 0x34:   // 读取电机实时设定的目标位置（开环模式的实时位置）
+    case 0x33:   // 读取电机目标位置
+    case 0x32:   // 读取输入脉冲数
+    case 0x31:   // 读取经过线性化校准后的编码器值
+    case 0x27:   // 读取相电流
+    case 0x24:   // 读取总线电压
+    case 0x21:   // 读取位置环 PID 参数
+    case 0x20:   // 读取相电阻和相电感
+    case 0x1F:   // 读取固件版本和对应的硬件版本
+        return true;
+    default:
+        return false;
+    }
+}
+
+// 解析读取系统状态参数命令返回内容
+static void parse_system_query(uint8_t *data, uint8_t id)
+{
+    motor[id].cur_sp = data[16] * 0x100 + data[17];
+    if (data[15])
+    {
+        motor[id].cur_sp = -motor[id].cur_sp;
+    }
+    motor[id].cur_pul = (data[19] << 24) | (data[20] << 16) | (data[21] << 8) | data[22];
+    motor[id].err_pul = (data[24] << 24) | (data[25] << 16) | (data[26] << 8) | data[27];
+    // motor[id].cur_pul = data[19] * 0x1000000 + data[20] * 0x10000 + data[21] * 0x100 + data[22];
+    // motor[id].err_pul = data[24] * 0x1000000 + data[25] * 0x10000 + data[26] * 0x100 + data[27];
+    int8_t mdir = 1;
+    if (data[18])
+    {
+        mdir = -1;
+    }
+    switch (id)
+    {
+    case 0:
+        motor[id].cur_pos = (float)motor[id].cur_pul * DPR_X / 65536;
+        motor[id].cur_pos = mdir * motor[id].back_dir * motor[id].cur_pos;
+        motor[id].err_pos = (float)motor[id].err_pul * DPR_X / 65536;
+        break;
+    case 1:
+        motor[id].cur_pos = (float)motor[id].cur_pul * DPR_Y / 65536;
+        motor[id].cur_pos = mdir * motor[id].back_dir * motor[id].cur_pos;
+        motor[id].err_pos = (float)motor[id].err_pul * DPR_Y / 65536;
+        break;
+    default:
+        break;
+    }
+    motor[id].cur_sp = (float)motor[id].cur_sp / 65536 * 60;
+    // ESP_LOGE(TAG, "motor: %d..sp = %d, pos = %f, pul = %d, mdir = %d, dir = %d", id,motor[id].cur_sp, motor[id].cur_pos, motor[id].cur_pul, mdir, motor[id].dir);
+    motor[id].ostate.encoder_ready = data[28] >> 0 & 0x01;
+    motor[id].ostate.calib_ready = data[28] >> 1 & 0x01;
+    motor[id].ostate.origining = data[28] >> 2 & 0x01;
+    motor[id].ostate.origin_failed = data[28] >> 3 & 0x01;
+
+    motor[id].mstate.enable = data[29] >> 0 & 0x01;
+    motor[id].mstate.reached = data[29] >> 1 & 0x01;
+    motor[id].mstate.stalled = data[29] >> 2 & 0x01;
+    motor[id].mstate.stallProt = data[29] >> 3 & 0x01;
+
+    // if (motor[id].ostate.orif && motor[id].mstate.reached && !motor[id].ostate.origin_failed && abs(motor[id].cur_pos) <= 10) {
+    if (motor[id].ostate.orif && motor[id].mstate.reached && abs(motor[id].cur_pos) <= 10)
+    {
+        motor[id].ostate.origined = 1;
+        motor[id].ostate.orif = 0;
+    }
+}
+
+void handle_motor_rx(uint8_t *data, int rxBytes)
+{
+    if (!reply_frame_valid(data, rxBytes))
+        return;
+
+    uint8_t id  = data[0] - 1;
+
+    uint8_t result = data[rxBytes - 2];
+    if (result == 0xEE) {
+        motor[id].ack = ACK_CMD_ERROR;
+        return;
+    }
+
+    uint8_t cmd = data[1];
+    if (is_query_cmd(cmd))
+    {
+        // 读取信息类命令
+        motor[id].ack = ACK_OK;
+
+        if (cmd == 0x43) {
+            parse_system_query(data, id);
+        }
+        return;
+    }
+    
+    // 执行类命令
+    switch (result)
+    {
+    case 0x02:
+        motor[id].ack = ACK_OK;
+        break;
+
+    case 0xE2:
+        motor[id].ack = ACK_CONDITION_FAIL;
+        break;
+    default:
+        // 未定义返回码
+        motor[id].ack = ACK_CMD_ERROR;
+        break;
+    }
+}
+
 // 电机串口接收任务
 void motor_rx_task(void *arg)
 {
@@ -455,72 +471,7 @@ void motor_rx_task(void *arg)
             ESP_LOG_BUFFER_HEX(TAG_RX, data, rxBytes);
             // ESP_LOG_BUFFER_HEXDUMP(TAG, data, rxBytes, ESP_LOG_INFO);
             grt.mot_wait = 0;
-            if (rxBytes >= 4 && data[2] == 0x02 && data[3] == 0x6B)
-            { // 确保至少有两个字母且都是字母  收到电机简单应答数据
-                motor[data[0] - 1].ack = 1;
-            }
-            else if (rxBytes >= 31 && data[1] == 0x43 && data[30] == 0x6B)
-            { // 收到电机详细状态数据
-
-                uint8_t id = data[0] - 1; // 电机编号
-                motor[id].ack = 1;
-                motor[id].cur_sp = data[16] * 0x100 + data[17];
-                if (data[15])
-                {
-                    motor[id].cur_sp = -motor[id].cur_sp;
-                }
-                motor[id].cur_pul = (data[19] << 24) | (data[20] << 16) | (data[21] << 8) | data[22];
-                motor[id].err_pul = (data[24] << 24) | (data[25] << 16) | (data[26] << 8) | data[27];
-                // motor[id].cur_pul = data[19] * 0x1000000 + data[20] * 0x10000 + data[21] * 0x100 + data[22];
-                // motor[id].err_pul = data[24] * 0x1000000 + data[25] * 0x10000 + data[26] * 0x100 + data[27];
-                int8_t mdir = 1;
-                if (data[18])
-                {
-                    mdir = -1;
-                }
-                switch (id)
-                {
-                case 0:
-                    motor[id].cur_pos = (float)motor[id].cur_pul * DPR_X / 65536;
-                    motor[id].cur_pos = mdir * motor[id].back_dir * motor[id].cur_pos;
-                    motor[id].err_pos = (float)motor[id].err_pul * DPR_X / 65536;
-                    break;
-                case 1:
-                    motor[id].cur_pos = (float)motor[id].cur_pul * DPR_Y / 65536;
-                    motor[id].cur_pos = mdir * motor[id].back_dir * motor[id].cur_pos;
-                    motor[id].err_pos = (float)motor[id].err_pul * DPR_Y / 65536;
-                    break;
-                case 2:
-                case 3:
-                    motor[id].cur_pos = (float)motor[id].cur_pul * DPR_T / 65536 / 3;
-                    motor[id].cur_pos = mdir * motor[id].back_dir * motor[id].cur_pos;
-                    motor[id].err_pos = (float)motor[id].err_pul * DPR_T / 65536 / 3;
-                    break;
-                default:
-                    break;
-                }
-                motor[id].cur_sp = (float)motor[id].cur_sp / 65536 * 60;
-                // ESP_LOGE(TAG, "motor: %d..sp = %d, pos = %f, pul = %d, mdir = %d, dir = %d", id,motor[id].cur_sp, motor[id].cur_pos, motor[id].cur_pul, mdir, motor[id].dir);
-                motor[id].ostate.encoder_ready = data[28] >> 0 & 0x01;
-                motor[id].ostate.calib_ready = data[28] >> 1 & 0x01;
-                motor[id].ostate.origining = data[28] >> 2 & 0x01;
-                motor[id].ostate.origin_failed = data[28] >> 3 & 0x01;
-
-                motor[id].mstate.enable = data[29] >> 0 & 0x01;
-                motor[id].mstate.reached = data[29] >> 1 & 0x01;
-                motor[id].mstate.stalled = data[29] >> 2 & 0x01;
-                motor[id].mstate.stallProt = data[29] >> 3 & 0x01;
-
-                // if (motor[id].ostate.orif && motor[id].mstate.reached && !motor[id].ostate.origin_failed && abs(motor[id].cur_pos) <= 10) {
-                if (motor[id].ostate.orif && motor[id].mstate.reached && abs(motor[id].cur_pos) <= 10)
-                {
-                    motor[id].ostate.origined = 1;
-                    motor[id].ostate.orif = 0;
-                }
-                // ESP_LOGE("MOTOR", "motor[%d].ostate.orif = %d, mstate.reached = %d, ostate.origin_failed = %d, cur_pos = %.2f",
-                //          id, motor[id].ostate.orif, motor[id].mstate.reached, motor[id].ostate.origin_failed, motor[id].cur_pos);
-                // ESP_LOGI("MOTOR", "motor: %d..%d,%d,%d,%d,%d,%d,%d,%d", id,motor[id].ostate.encoder_ready,motor[id].ostate.calib_ready,motor[id].ostate.origining,motor[id].ostate.origin_failed,motor[id].mstate.enable,motor[id].mstate.reached,motor[id].mstate.stalled,motor[id].mstate.stallProt);
-            }
+            handle_motor_rx(data, rxBytes);
         }
     }
     free(data);
@@ -529,8 +480,8 @@ void motor_rx_task(void *arg)
 // 复位
 void back_origin(uint8_t m_num)
 {
-    cmd_ori[m_num] = 1; // 电机复位标志
     motor[m_num].ostate.orif = true;
+    cmd_ori[m_num] = 1; // 电机复位标志
 }
 
 // ZMOT初始化参数
@@ -578,7 +529,7 @@ void ZMOT_init(void)
     motor[2].abs_mode = 1;
     motor[3].abs_mode = 1;
     motor[0].pos_dir = 0; //
-    motor[1].pos_dir = 1; // 电机二为负方向
+    motor[1].pos_dir = 0; //
     motor[2].pos_dir = 0;
     motor[3].pos_dir = 1;
     motor[0].tar_sp = 8;
@@ -672,7 +623,6 @@ void ZDTMOT_sync(uint8_t adr)
 void ZDTMOT_origin(uint8_t adr, uint8_t mode, uint8_t sync)
 {
     uint8_t txbuff[5] = {adr + 1, 0x9A, mode, sync, 0x6B};
-    ESP_LOG_BUFFER_HEX(TAG_TX, txbuff, 5);
     motor_tx_send((uint8_t *)txbuff, 5);
 }
 
@@ -761,8 +711,8 @@ void ZDTMOT_get_status(uint8_t adr)
 void ZDTMOT_get_sys_status(uint8_t adr)
 {
     uint8_t txbuff[4] = {adr + 1, 0x43, 0x7A, 0x6B};
-    uart_write_bytes(UART_NUM_2, txbuff, 4);
-    // motor_tx_send((uint8_t*) txbuff, 4);
+    // uart_write_bytes(UART_NUM_2, txbuff, 4);
+    motor_tx_send((uint8_t*) txbuff, 4);
 }
 // 命令功能：设置单圈回零的零点位置
 // 命令格式：地址 + 0x93 + 0x88 + 是否存储标志 + 校验字节
@@ -800,11 +750,11 @@ void ZDT_X42_V2_Traj_Position_Control(uint8_t addr, uint8_t dir, uint16_t acc, u
   cmd[1]  =  0xFD;                      // 功能码
   cmd[2]  =  dir;                       // 符号（方向）
   cmd[3]  =  (uint8_t)(acc >> 8);       // 加速加速度(RPM/s)高8位字节
-  cmd[4]  =  (uint8_t)(acc >> 0);       // 加速加速度(RPM/s)低8位字节  
+  cmd[4]  =  (uint8_t)(acc >> 0);       // 加速加速度(RPM/s)低8位字节
   cmd[5]  =  (uint8_t)(dec >> 8);       // 减速加速度(RPM/s)高8位字节
-  cmd[6]  =  (uint8_t)(dec >> 0);       // 减速加速度(RPM/s)低8位字节  
+  cmd[6]  =  (uint8_t)(dec >> 0);       // 减速加速度(RPM/s)低8位字节
   cmd[7]  =  (uint8_t)(vel >> 8);       // 最大速度(RPM)高8位字节
-  cmd[8]  =  (uint8_t)(vel >> 0);       // 最大速度(RPM)低8位字节 
+  cmd[8]  =  (uint8_t)(vel >> 0);       // 最大速度(RPM)低8位字节
   cmd[9]  =  (uint8_t)(pos >> 24);      // 位置(bit24 - bit31)
   cmd[10] =  (uint8_t)(pos >> 16);      // 位置(bit16 - bit23)
   cmd[11] =  (uint8_t)(pos >> 8);       // 位置(bit8  - bit15)
@@ -812,7 +762,7 @@ void ZDT_X42_V2_Traj_Position_Control(uint8_t addr, uint8_t dir, uint16_t acc, u
   cmd[13] =  raf;                       // 相位位置/绝对位置标志
   cmd[14] =  snF;                       // 多机同步运动标志
   cmd[15] =  0x6B;                      // 校验字节
-  
+
   // 发送命令
   motor_tx_send((uint8_t *)cmd, 32);
 }
@@ -827,14 +777,14 @@ void ZDT_X42_V2_Traj_Position_Control(uint8_t addr, uint8_t dir, uint16_t acc, u
 // void ZDT_X42_V2_Origin_Trigger_Return(uint8_t addr, uint8_t o_mode, bool snF)
 // {
 //   uint8_t cmd[16] = {0};
-  
+
 //   // 装载命令
 //   cmd[0] =  addr;                       // 地址
 //   cmd[1] =  0x9A;                       // 功能码
 //   cmd[2] =  o_mode;                     // 回零模式，0为单圈就近回零，1为单圈方向回零，2为多圈无限位碰撞回零，3为多圈有限位开关回零
 //   cmd[3] =  snF;                        // 多机同步运动标志，false为不启用，true为启用
 //   cmd[4] =  0x6B;                       // 校验字节
-  
+
 //   // 发送命令
 //   motor_tx_send((uint8_t *)cmd, 32);
 // }

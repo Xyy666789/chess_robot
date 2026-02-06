@@ -21,15 +21,16 @@
 #include "soft_i2c.h"
 #include "Motor_28BYJ.h"
 
-static const char *TAG = "MAIN";
+static const char *TAG_MAIN = "APP_MAIN";
+static const char *TAG_ARM = "ARM_CTL";
 
 go_robot_t grt;
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "APP Start......");
+    ESP_LOGI(TAG_MAIN, "APP Start......");
     /*初始化flash*/
-    ESP_LOGI(TAG, "初始化FLASH......");
+    ESP_LOGI(TAG_MAIN, "初始化FLASH......");
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES)
     {
@@ -48,7 +49,8 @@ void app_main(void)
     const TickType_t xFrequency = 4000 / portTICK_PERIOD_MS; // 打印间隔时间，ms
     xLastWakeTime = xTaskGetTickCount();                     // 初始化上一次唤醒时间
 
-    ESP_LOGI(TAG, "初始化程序......");
+    // 开始初始化
+    ESP_LOGI(TAG_MAIN, "初始化程序......");
     grt.air_duty = 100; // 默认气泵占空比，80%
     grt.move_order = 0; // 默认先后手·
     grt.pending_movd = false;
@@ -71,25 +73,25 @@ void app_main(void)
     ZMOT_init();                                                               // 初始化电机控制参数
     motor_gpio_init();                                                         // 初始化28BYJ电机GPIO
     xTaskCreate(Arm_motion_test, "Arm_motion_test", 1024 * 20, NULL, 5, NULL); // 创建臂部运动测试线程
-    xTaskCreate(Detection_task, "Detection_task", 1024 * 6, NULL, 5, NULL);    // 创建输入检测线程
+    // xTaskCreate(Detection_task, "Detection_task", 1024 * 6, NULL, 5, NULL);    // 创建输入检测线程
     // xTaskCreate(play_chess_task, "play_chess_task", 1024 * 20, NULL, 5, NULL); //创建下棋线程
     xTaskCreatePinnedToCore(rx_task, "rx_task", 1024 * 6, NULL, 2, NULL, 1); // 创建上位机串口接收线程，使用核心1
     xTaskCreate(motor_rx_task, "motor_rx_task", 1024 * 6, NULL, 3, NULL);    // 创建电机串口接收线程
     // xTaskCreate(soft_i2c_task1, "soft_i2c_task1", 1024 * 6, NULL, 10, NULL);//创建i2c线程，读取APDS9960传感器数据
     // xTaskCreatePinnedToCore(soft_i2c_task2, "soft_i2c_task2", 1024 * 6, NULL, 11, NULL, 1);//创建i2c线程，读取APDS9960传感器数据，使用核心1
     xTaskCreate(zmot_cmd, "zmot_cmd", 1024 * 20, NULL, 21, NULL); // 创建电机命令控制线程
-    ESP_LOGI(TAG, "初始化完成");
+    ESP_LOGI(TAG_MAIN, "初始化完成");
+    ESP_LOGI(TAG_MAIN, "上电时间: %lld us", esp_timer_get_time());
 
-    ESP_LOGI(TAG, "上电时间: %lld us", esp_timer_get_time());
-
+    // 持续输出 Verbose 级别监控日志
     while (1)
     {
         for (int id = 0; id < MOT_COT; id++)
         {
-            // ESP_LOGI("电机", "%d:复位状态%d,当前位置%.1f,编码器%d,目标位置%.1f,位置误差%d,O状态%d%d%d%d,M状态%d%d%d%d", id, motor[id].ostate.origined, motor[id].cur_pos, motor[id].cur_pul, motor[id].tar_pos, motor[id].err_pul, motor[id].ostate.encoder_ready, motor[id].ostate.calib_ready, motor[id].ostate.origining, motor[id].ostate.origin_failed, motor[id].mstate.enable, motor[id].mstate.reached, motor[id].mstate.stalled, motor[id].mstate.stallProt);
+            ESP_LOGV(TAG_MAIN, "%d:复位状态%d,当前位置%.1f,编码器%d,目标位置%.1f,位置误差%d,O状态%d%d%d%d,M状态%d%d%d%d", id, motor[id].ostate.origined, motor[id].cur_pos, motor[id].cur_pul, motor[id].tar_pos, motor[id].err_pul, motor[id].ostate.encoder_ready, motor[id].ostate.calib_ready, motor[id].ostate.origining, motor[id].ostate.origin_failed, motor[id].mstate.enable, motor[id].mstate.reached, motor[id].mstate.stalled, motor[id].mstate.stallProt);
         }
-        // ESP_LOGI(TAG, "运行时间: %lld us,step_p: %d, step_o: %d, tl= %d | grid= %d, tr = %d | grid= %d, proximity L= %d|R= %d, vacuo_state = %d", esp_timer_get_time(), grt.step_p, grt.step_o, grt.step_t[0], grt.grid[0], grt.step_t[1], grt.grid[1], grt.proximity[0], grt.proximity[1], grt.vacuo_state);
-        // ESP_LOGI(TAG, "event: %d, %d, %d, %d, %d, %d, %d, %d, %d", grt.event[0], grt.event[1], grt.event[2], grt.event[3], grt.event[4], grt.event[5], grt.event[6], grt.event[7], grt.event[8]);
+        ESP_LOGV(TAG_MAIN, "运行时间: %lld us,step_p: %d, step_o: %d, tl= %d | grid= %d, tr = %d | grid= %d, proximity L= %d|R= %d, vacuo_state = %d", esp_timer_get_time(), grt.step_p, grt.step_o, grt.step_t[0], grt.grid[0], grt.step_t[1], grt.grid[1], grt.proximity[0], grt.proximity[1], grt.vacuo_state);
+        ESP_LOGV(TAG_MAIN, "event: %d, %d, %d, %d, %d, %d, %d, %d, %d", grt.event[0], grt.event[1], grt.event[2], grt.event[3], grt.event[4], grt.event[5], grt.event[6], grt.event[7], grt.event[8]);
         vTaskDelayUntil(&xLastWakeTime, xFrequency);
     }
 }
@@ -121,20 +123,20 @@ void Arm_motion_test(void *arg)
     int init_count = 0;
     static int first_box_drop_done = 0; // 0: 未首次下放，1: 已首次下放
     // 让两个电机归零
-    ESP_LOGE("让两个电机归零", "start");
     back_origin(MOT_X);
     back_origin(MOT_Y);
     cmd_sync = 1;
+    ESP_LOGI(TAG_ARM, "电机回零开始......");
 
     while ((check_origin()) == 0)
     {
-        ESP_LOGE("检查回零", "waiting...");
+        ESP_LOGD(TAG_ARM, "检查回零中......");
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     MotorClockwise_Angle(40);
     MotorStop();
-    ESP_LOGE("归零完成", "finish");
-    
+    ESP_LOGI(TAG_ARM, "电机回零完成");
+
     while (1)
     {
 
@@ -147,7 +149,7 @@ void Arm_motion_test(void *arg)
             grt.play_posy = (float)grt.pending_movd_y * UNIT_DISTANCE_Y + ORIGIN_OFFSET_Y;
             grt.poscmd_flag = true;
             grt.drop_flag = true;
-            ESP_LOGI(TAG, "执行待处理 MOVD: %.2f, %.2f", grt.play_posx, grt.play_posy);
+            ESP_LOGI(TAG_ARM, "执行待处理 MOVD: %.2f, %.2f", grt.play_posx, grt.play_posy);
         }
         if (grt.poscmd_flag == true)
         {
@@ -256,7 +258,7 @@ void Arm_motion_test(void *arg)
                 // 放子完成后，自动执行 GETCHESS（从棋盒取下一颗棋子）
                 grt.pickup_from_box = true;
                 grt.pickup_flag = true;
-                ESP_LOGI(TAG, "放子完成，自动触发 GETCHESS（从棋盒取子）");
+                ESP_LOGI(TAG_ARM, "放子完成，自动触发 GETCHESS（从棋盒取子）");
             }
         }
 
@@ -575,7 +577,7 @@ void play_chess_task(void *arg)
             if (check_origin())
             {                         // 等待复位完成
                 uart_send("START\n"); // 开始对局
-                ESP_LOGI(TAG, "检测到复位完成，开始对局");
+                ESP_LOGI(TAG_ARM, "检测到复位完成，开始对局");
                 grt.step_p = 2;
             }
             break;

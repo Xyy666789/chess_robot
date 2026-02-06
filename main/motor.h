@@ -37,6 +37,28 @@
 #define MOT_TR 3
 
 typedef enum {
+    CMD_IDLE = 0,
+    CMD_PENDING = 1,
+    CMD_WAITING_FOR_ACK = 2
+} cmd_state_t;
+
+typedef enum {
+    ACK_NOT_RECEIVED = 0,   // 未收到电机 ACK
+    ACK_OK = 1,             // 电机 ACK 正确
+    ACK_CONDITION_FAIL = 2, // 电机 ACK 条件不满足
+    ACK_CMD_ERROR = 3,      // 电机 ACK 命令错误
+} motor_ack_t;
+
+// 向电机发送指令后处理 ACK 的策略
+typedef enum
+{
+    CMD_RES_WAITING = 0,    // 继续等待
+    CMD_RES_SUCCESS,        // 成功
+    CMD_RES_ERROR,          // 发生错误 或 超时跳过
+    CMD_RES_RETRY           // 超时重试
+} cmd_result_t;
+
+typedef enum {
     MODE_STOP,
     MODE_ORIGIN,
     MODE_SPEED,
@@ -131,8 +153,6 @@ int check_origin(void);
 void grt_event_dispose(void);
 void motor_rx_task(void* arg);
 void motor_tx_send(uint8_t* data, uint8_t len);
-
-void sync_while(void);
 
 typedef struct {
     void (*enable)(uint8_t adr, uint8_t state);

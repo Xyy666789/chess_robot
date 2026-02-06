@@ -9,7 +9,7 @@
 #endif
 #define DEG_TO_RAD(x) ((x) * M_PI / 180.0)
 #define RAD_TO_DEG(x) ((x) * 180.0 / M_PI)
-#define GEAR_RATIO 0.5// 齿轮比 小于1，若无齿轮则为1.0
+#define GEAR_RATIO 1.0  // 齿轮比 小于1，若无齿轮则为1.0
 
 // 二维点结构
 typedef struct {
